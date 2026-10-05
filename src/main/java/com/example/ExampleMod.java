@@ -1,30 +1,152 @@
 package com.example;
 
+import com.mojang.serialization.Codec;
 import net.fabricmc.api.ModInitializer;
+import net.fabricmc.fabric.api.attachment.v1.AttachmentRegistry;
+import net.fabricmc.fabric.api.attachment.v1.AttachmentType;
+import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
+import net.fabricmc.fabric.api.event.player.UseEntityCallback;
+import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
+import net.minecraft.commands.Commands;
+import net.minecraft.network.chat.Component;
+import net.minecraft.resources.ResourceLocation;
+import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.InteractionResult;
+import net.minecraft.world.effect.MobEffectInstance;
+import net.minecraft.world.effect.MobEffects;
+import net.minecraft.world.entity.ai.attributes.AttributeInstance;
+import net.minecraft.world.entity.ai.attributes.AttributeModifier;
+import net.minecraft.world.entity.ai.attributes.Attributes;
+import net.minecraft.world.entity.animal.horse.Donkey;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.item.Items;
 
-import net.minecraft.resources.Identifier;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import java.util.List;
+import java.util.Random;
 
 public class ExampleMod implements ModInitializer {
-	public static final String MOD_ID = "modid";
 
-	// This logger is used to write text to the console and the log file.
-	// It is considered best practice to use your mod id as the logger's name.
-	// That way, it's clear which mod wrote info, warnings, and errors.
-	public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
+    public static final AttachmentType<String> PLAYER_CLASS = AttachmentRegistry.createPersistent(
+            ResourceLocation.fromNamespaceAndPath("bogatyr", "class"), Codec.STRING
+    );
 
-	@Override
-	public void onInitialize() {
-		// This code runs as soon as Minecraft is in a mod-load-ready state.
-		// However, some things (like resources) may still be uninitialized.
-		// Proceed with mild caution.
+    private static final String[] CLASSES = {"COPPER_BOGATYR", "DONKEY_RIDER", "MAXIM", "SENATOR"};
+    private static final Random RANDOM = new Random();
 
-		LOGGER.info("Hello Fabric world!");
-	}
+    private static final ResourceLocation HEALTH_MOD_ID = ResourceLocation.fromNamespaceAndPath("bogatyr", "health_bonus");
+    private static final ResourceLocation DAMAGE_MOD_ID = ResourceLocation.fromNamespaceAndPath("bogatyr", "damage_bonus");
+    private static final ResourceLocation SPEED_MOD_ID = ResourceLocation.fromNamespaceAndPath("bogatyr", "speed_bonus");
 
-	public static Identifier id(String path) {
-		return Identifier.fromNamespaceAndPath(MOD_ID, path);
-	}
+    @Override
+    public void onInitialize() {
+        registerEvents();
+        registerCommands();
+    }
+
+    private void registerEvents() {
+        ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> {
+            ServerPlayer player = handler.getPlayer();
+            String currentClass = player.getAttachedOrCreate(PLAYER_CLASS, () -> "NONE");
+
+            if ("NONE".equals(currentClass)) {
+                currentClass = CLASSES[RANDOM.nextInt(CLASSES.length)];
+                player.setAttached(PLAYER_CLASS, currentClass);
+                player.sendSystemMessage(Component.literal("§aТвой класс: §l" + currentClass));
+                applyStaticModifiers(player, currentClass);
+            }
+        });
+
+        ServerTickEvents.END_SERVER_TICK.register(server -> {
+            for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+                String playerClass = player.getAttachedOrCreate(PLAYER_CLASS, () -> "NONE");
+
+                switch (playerClass) {
+                    case "COPPER_BOGATYR" -> {
+                        if (player.tickCount % 1200 == 0) {
+                            player.getInventory().placeItemBackInInventory(new ItemStack(Items.COPPER_INGOT));
+                        }
+                    }
+                    case "MAXIM" -> {
+                        if (player.tickCount % 12000 == 0) {
+                            player.addEffect(new MobEffectInstance(MobEffects.CONFUSION, 1200, 0));
+                            player.addEffect(new MobEffectInstance(MobEffects.WEAKNESS, 1200, 0));
+                            player.addEffect(new MobEffectInstance(MobEffects.BLINDNESS, 1200, 0));
+                        }
+                        if (player.tickCount % 20 == 0) {
+                            List<ServerPlayer> nearby = player.level().getEntitiesOfClass(
+                                    ServerPlayer.class, 
+                                    player.getBoundingBox().inflate(4.0), 
+                                    p -> p != player
+                            );
+                            for (ServerPlayer target : nearby) {
+                                target.addEffect(new MobEffectInstance(MobEffects.CONFUSION, 60, 0));
+                                target.addEffect(new MobEffectInstance(MobEffects.POISON, 60, 0));
+                            }
+                        }
+                    }
+                    case "DONKEY_RIDER" -> {
+                        AttributeInstance speedAttr = player.getAttribute(Attributes.MOVEMENT_SPEED);
+                        if (speedAttr != null) {
+                            speedAttr.removeModifier(SPEED_MOD_ID);
+                            if (player.getVehicle() instanceof Donkey) {
+                                speedAttr.addTransientModifier(new AttributeModifier(SPEED_MOD_ID, 0.15, AttributeModifier.Operation.ADD_VALUE));
+                            } else {
+                                speedAttr.addTransientModifier(new AttributeModifier(SPEED_MOD_ID, -0.05, AttributeModifier.Operation.ADD_VALUE));
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        UseEntityCallback.EVENT.register((player, world, hand, entity, hitResult) -> {
+            if (!world.isClient() && player instanceof ServerPlayer serverPlayer) {
+                String pClass = serverPlayer.getAttachedOrCreate(PLAYER_CLASS, () -> "NONE");
+                if ("DONKEY_RIDER".equals(pClass) && entity instanceof Donkey donkey) {
+                    if (!donkey.isTamed()) {
+                        donkey.tameWithName(player);
+                        player.sendSystemMessage(Component.literal("§eОсёл послушно склонил голову."));
+                        return InteractionResult.SUCCESS;
+                    }
+                }
+            }
+            return InteractionResult.PASS;
+        });
+    }
+
+    private void registerCommands() {
+        CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) -> {
+            dispatcher.register(Commands.literal("Bogatyr")
+                    .executes(context -> {
+                        ServerPlayer player = context.getSource().getPlayerOrException();
+                        String pClass = player.getAttachedOrCreate(PLAYER_CLASS, () -> "NONE");
+                        player.sendSystemMessage(Component.literal("§6Твой текущий класс: §l" + pClass));
+                        return 1;
+                    })
+            );
+        });
+    }
+
+    private void applyStaticModifiers(ServerPlayer player, String playerClass) {
+        AttributeInstance health = player.getAttribute(Attributes.MAX_HEALTH);
+        AttributeInstance damage = player.getAttribute(Attributes.ATTACK_DAMAGE);
+        AttributeInstance speed = player.getAttribute(Attributes.MOVEMENT_SPEED);
+
+        if (health != null) health.removeModifier(HEALTH_MOD_ID);
+        if (damage != null) damage.removeModifier(DAMAGE_MOD_ID);
+        if (speed != null) speed.removeModifier(SPEED_MOD_ID);
+
+        switch (playerClass) {
+            case "COPPER_BOGATYR" -> {
+                if (health != null) health.addPermanentModifier(new AttributeModifier(HEALTH_MOD_ID, 10.0, AttributeModifier.Operation.ADD_VALUE));
+            }
+            case "SENATOR" -> {
+                if (health != null) health.addPermanentModifier(new AttributeModifier(HEALTH_MOD_ID, 10.0, AttributeModifier.Operation.ADD_VALUE));
+                if (damage != null) damage.addPermanentModifier(new AttributeModifier(DAMAGE_MOD_ID, 10.0, AttributeModifier.Operation.ADD_VALUE));
+                if (speed != null) speed.addPermanentModifier(new AttributeModifier(SPEED_MOD_ID, -0.05, AttributeModifier.Operation.ADD_VALUE));
+            }
+        }
+        player.setHealth(player.getMaxHealth());
+    }
 }
