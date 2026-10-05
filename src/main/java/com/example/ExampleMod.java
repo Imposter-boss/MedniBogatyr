@@ -8,6 +8,7 @@ import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.event.player.UseEntityCallback;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
+import net.minecraft.ChatFormatting;
 import net.minecraft.commands.Commands;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
@@ -52,7 +53,10 @@ public class ExampleMod implements ModInitializer {
             if ("NONE".equals(currentClass)) {
                 currentClass = CLASSES[RANDOM.nextInt(CLASSES.length)];
                 player.setAttached(PLAYER_CLASS, currentClass);
-                player.sendSystemMessage(Component.literal("§aТвой класс: §l" + currentClass));
+                
+                player.sendSystemMessage(Component.literal("Твой класс: " + currentClass)
+                        .withStyle(ChatFormatting.GREEN, ChatFormatting.BOLD));
+                
                 applyStaticModifiers(player, currentClass);
             }
         });
@@ -88,11 +92,15 @@ public class ExampleMod implements ModInitializer {
                     case "DONKEY_RIDER" -> {
                         AttributeInstance speedAttr = player.getAttribute(Attributes.MOVEMENT_SPEED);
                         if (speedAttr != null) {
-                            speedAttr.removeModifier(SPEED_MOD_ID);
-                            if (player.getVehicle() instanceof Donkey) {
-                                speedAttr.addTransientModifier(new AttributeModifier(SPEED_MOD_ID, 0.15, AttributeModifier.Operation.ADD_VALUE));
+                            if (player.getVehicle() instanceof Donkey donkey) {
+                                if (speedAttr.hasModifier(SPEED_MOD_ID)) {
+                                    speedAttr.removeModifier(SPEED_MOD_ID);
+                                }
+                                donkey.addEffect(new MobEffectInstance(MobEffects.MOVEMENT_SPEED, 40, 1, false, false, false));
                             } else {
-                                speedAttr.addTransientModifier(new AttributeModifier(SPEED_MOD_ID, -0.05, AttributeModifier.Operation.ADD_VALUE));
+                                if (!speedAttr.hasModifier(SPEED_MOD_ID)) {
+                                    speedAttr.addTransientModifier(new AttributeModifier(SPEED_MOD_ID, -0.05, AttributeModifier.Operation.ADD_VALUE));
+                                }
                             }
                         }
                     }
@@ -106,7 +114,8 @@ public class ExampleMod implements ModInitializer {
                 if ("DONKEY_RIDER".equals(pClass) && entity instanceof Donkey donkey) {
                     if (!donkey.isTamed()) {
                         donkey.tameWithName(player);
-                        player.sendSystemMessage(Component.literal("§eОсёл послушно склонил голову."));
+                        player.sendSystemMessage(Component.literal("Осёл послушно склонил голову.")
+                                .withStyle(ChatFormatting.YELLOW));
                         return InteractionResult.SUCCESS;
                     }
                 }
@@ -117,11 +126,12 @@ public class ExampleMod implements ModInitializer {
 
     private void registerCommands() {
         CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) -> {
-            dispatcher.register(Commands.literal("Bogatyr")
+            dispatcher.register(Commands.literal("bogatyr")
                     .executes(context -> {
                         ServerPlayer player = context.getSource().getPlayerOrException();
                         String pClass = player.getAttachedOrCreate(PLAYER_CLASS, () -> "NONE");
-                        player.sendSystemMessage(Component.literal("§6Твой текущий класс: §l" + pClass));
+                        player.sendSystemMessage(Component.literal("Твой текущий класс: " + pClass)
+                                .withStyle(ChatFormatting.GOLD, ChatFormatting.BOLD));
                         return 1;
                     })
             );
