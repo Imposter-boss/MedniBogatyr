@@ -1,19 +1,9 @@
 {
   "schemaVersion": 1,
-  "id": "bogatyr",
-  "version": "${version}",
-  "name": "Medni Bogatyr",
-  "description": "Zufaellige Klassen fuer jeden Spieler. Befehl: /bogatyr",
-  "authors": ["Imposter-boss"],
-  "license": "CC0-1.0",
-  "environment": "*",
-  "entrypoints": {
-    "main": ["com.example.ExampleMod"]
-  },
-  "depends": {
-    "fabricloader": ">=0.19.1",
-    "minecraft": "~26.2",
-    "java": ">=25",
-    "fabric-api": "*"
-  }
+  "id": "customclasses",
+  "version": "1.0.0",
+  "name": "Custom Classes Mod",
+  "entrypoints": { "main": ["com.example.ExampleMod"] },
+  "mixins": ["modid.mixins.json"],
+  "depends": { "fabricloader": ">=0.15.0", "minecraft": "~1.20.1", "java": ">=17" }
 }
